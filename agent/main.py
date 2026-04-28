@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 import pandas as pd
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from google import adk
@@ -17,6 +17,11 @@ import uuid
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import PyPDF2
+import shutil
+import docx
+from PIL import Image
+import pytesseract
 
 from google.adk.sessions import DatabaseSessionService
 import sqlalchemy
@@ -38,6 +43,9 @@ app.mount("/graficos", StaticFiles(directory="graficos"), name="graficos")
 # Crear carpeta para guardar los reportes de Excel generados y montarla en la web
 os.makedirs("reportes", exist_ok=True)
 app.mount("/reportes", StaticFiles(directory="reportes"), name="reportes")
+
+# Crear carpeta para los documentos PDF de los clientes
+os.makedirs("documentos", exist_ok=True)
 
 # --- CONSTANTES Y MAPEOS ---
 MAPA_ESTADOS = {
@@ -283,9 +291,57 @@ def generar_grafico_analisis(metrica: str) -> str:
 # --- NUEVAS HERRAMIENTAS AVANZADAS (PLANTILLAS) ---
 
 def analizar_documento_cliente(nombre_cliente: str, tipo_documento: str) -> str:
-    """Busca y analiza el contenido de un documento o evidencia PDF (ej. 'cotizacion', 'contrato') de un cliente."""
-    # Plantilla para futura integración con PyPDF2 o Google Document AI
-    return f"[Document AI Simulación] He analizado el documento '{tipo_documento}' de {nombre_cliente}. Los puntos clave indican un interés presupuestal sólido y solicitan soporte técnico adicional. No se encontraron riesgos legales."
+    """Busca un archivo (PDF, Word, Excel o Imagen) en la carpeta 'documentos/' que coincida con el nombre del cliente o tipo, extrae su texto y lo devuelve para su análisis."""
+    carpeta = "documentos"
+    
+    extensiones_validas = ('.pdf', '.docx', '.xlsx', '.png', '.jpg', '.jpeg')
+    archivos = [f for f in os.listdir(carpeta) if f.lower().endswith(extensiones_validas)]
+    if not archivos:
+        return f"La carpeta '{carpeta}/' está vacía. Por favor, coloca archivos PDF, Word, Excel o Imágenes allí."
+        
+    archivo_encontrado = None
+    # Intentar buscar por nombre de cliente primero
+    for arch in archivos:
+        if nombre_cliente.lower().replace(" ", "") in arch.lower().replace(" ", ""):
+            archivo_encontrado = os.path.join(carpeta, arch)
+            break
+            
+    # Si no, buscar por tipo de documento (ej. 'contrato')
+    if not archivo_encontrado:
+        for arch in archivos:
+            if tipo_documento.lower() in arch.lower():
+                archivo_encontrado = os.path.join(carpeta, arch)
+                break
+                
+    if not archivo_encontrado:
+        return f"No encontré ningún archivo asociado a '{nombre_cliente}' o que sea un '{tipo_documento}' en la carpeta 'documentos/'."
+        
+    try:
+        ext = archivo_encontrado.split('.')[-1].lower()
+        texto_extraido = ""
+        
+        if ext == 'pdf':
+            with open(archivo_encontrado, 'rb') as file:
+                lector = PyPDF2.PdfReader(file)
+                texto_extraido = "".join([lector.pages[i].extract_text() + "\n" for i in range(min(len(lector.pages), 10))])
+        elif ext == 'docx':
+            doc = docx.Document(archivo_encontrado)
+            texto_extraido = "\n".join([p.text for p in doc.paragraphs])
+        elif ext == 'xlsx':
+            df_excel = pd.read_excel(archivo_encontrado)
+            texto_extraido = df_excel.head(100).to_string() # Limitamos a 100 filas para no saturar al modelo
+        elif ext in ['png', 'jpg', 'jpeg']:
+            img = Image.open(archivo_encontrado)
+            texto_extraido = pytesseract.image_to_string(img)
+            if not texto_extraido.strip():
+                texto_extraido = "[No se pudo extraer texto de la imagen o no contiene texto legible]"
+                
+        # Recortar el texto para no exceder los límites del modelo
+        texto_extraido = texto_extraido[:15000]
+        
+        return f"Aquí tienes el contenido del archivo '{os.path.basename(archivo_encontrado)}'. Léelo cuidadosamente y hazle un buen resumen analítico al usuario:\n\n{texto_extraido}"
+    except Exception as e:
+        return f"Error al intentar leer el archivo {ext}: {e}"
 
 def enviar_correo_cliente(nombre_cliente: str, correo_destino: str, asunto: str, cuerpo: str) -> str:
     """
@@ -317,8 +373,35 @@ def enviar_correo_cliente(nombre_cliente: str, correo_destino: str, asunto: str,
 
 def calcular_probabilidad_cierre(nombre_cliente: str) -> str:
     """Utiliza un modelo predictivo (Lead Scoring) para calcular la probabilidad de que un prospecto cierre la venta."""
-    # Plantilla: Aquí se calcularía combinando 'valor_estimado', estado actual y cantidad de seguimientos en la base de datos.
-    return f"Basado en el modelo de Lead Scoring y las interacciones recientes, '{nombre_cliente}' tiene una probabilidad de cierre del **88% (Alta)**. ¡Te sugiero priorizar su seguimiento hoy mismo!"
+    try:
+        df = consultar_cloud_sql(nombre_cliente)
+        if df.empty:
+            return f"No encontré a '{nombre_cliente}' en la base de datos para calcular su Lead Scoring."
+        
+        # Tomamos el primer resultado que coincida
+        cliente = df.iloc[0]
+        
+        # Variables base
+        estado = cliente.get('_estado', 1)
+        valor = cliente.get('valor_estimado', 0)
+        
+        # Cálculo de Scoring Básico (Basado en Etapas del Pipeline)
+        score = 15 # Base
+        if pd.notna(estado):
+            if estado >= 6: score += 60  # Cotizado en adelante
+            elif estado >= 4: score += 35 # En proceso
+            elif estado >= 2: score += 15 # Contactado
+            
+        # Puntos adicionales por el tamaño de la cuenta (sweet spot)
+        if pd.notna(valor) and valor > 10000:
+            score += 15 
+            
+        score = min(score, 99) # Topar a 99% máximo
+        etiqueta = "Alta" if score >= 70 else ("Media" if score >= 40 else "Baja")
+        
+        return f"Cálculo de Lead Scoring para **{cliente['nombre']}**: Probabilidad de cierre del **{score}% ({etiqueta})**. (Basado matemáticamente en su estado '{MAPA_ESTADOS.get(estado, 'Desconocido')}' y valor de negocio)."
+    except Exception as e:
+        return f"Error al calcular el Lead Scoring: {e}"
 
 def exportar_datos_excel(termino_busqueda: str = "") -> str:
     """
@@ -360,12 +443,36 @@ def ejecutar_consulta_sql_avanzada(query_sql: str) -> str:
     finally:
         connector.close()
 
+def revisar_clientes_abandonados() -> str:
+    """
+    Busca en la base de datos clientes activos que no han tenido seguimiento en más de 7 días.
+    Útil para alertar al usuario en el chat sobre prospectos abandonados que necesitan atención urgente.
+    """
+    engine, connector = obtener_motor_bd()
+    try:
+        with engine.connect() as conn:
+            query = sqlalchemy.text("SELECT nombre, empresa, _estado FROM clientes WHERE _estado < 8 AND fecha_ultima_actividad < NOW() - INTERVAL '7 days'")
+            result = conn.execute(query).fetchall()
+
+        if not result:
+            return "¡Buenas noticias! No tienes clientes abandonados por más de 7 días. Todos tienen seguimiento reciente."
+
+        alertas = "⚠️ He detectado los siguientes clientes inactivos por más de 7 días:\n"
+        for row in result:
+            estado_txt = MAPA_ESTADOS.get(row[2], 'Desconocido')
+            alertas += f"- **{row[0]}** de {row[1]} (Etapa actual: {estado_txt})\n"
+        return alertas + "\nTe sugiero darles seguimiento hoy mismo."
+    except Exception as e:
+        return f"Error al revisar clientes abandonados: {e}"
+    finally:
+        connector.close()
+
 # --- CONFIGURACIÓN DEL AGENTE (ADK 1.15.1) ---
 agente = adk.Agent(
     name="BatiaCommercialAgent",
     model="gemini-2.5-flash",
-    instruction="Eres el asistente avanzado de Lore en Grupo Batia. Capacidades: 1) Buscar clientes, 2) Consultar BI, 3) Generar gráficos HTML (<img>), 4) Actualizar estados, 5) Registrar seguimientos, 6) Analizar PDFs, 7) Enviar correos, 8) Calcular Lead Scoring, 9) Obtener resúmenes financieros, 10) Exportar a Excel (<img>), y 11) Ejecutar SQL puro. Actúa de forma proactiva, analítica y profesional. Cuando te pidan cruces complejos, usa SQL.",
-    tools=[buscar_clientes_por_criterio, consultar_dashboard_bi, generar_grafico_analisis, actualizar_estado_cliente, registrar_seguimiento_cliente, analizar_documento_cliente, enviar_correo_cliente, calcular_probabilidad_cierre, obtener_resumen_pipeline, exportar_datos_excel, ejecutar_consulta_sql_avanzada]
+    instruction="Eres el asistente avanzado de Lore en Grupo Batia. Capacidades: 1) Buscar clientes, 2) Consultar BI, 3) Generar gráficos HTML (<img>), 4) Actualizar estados, 5) Registrar seguimientos, 6) Analizar PDFs, 7) Enviar correos, 8) Calcular Lead Scoring, 9) Obtener resúmenes financieros, 10) Exportar a Excel (<img>), 11) Ejecutar SQL puro (PostgreSQL, _estado es int 1-9), y 12) Revisar clientes abandonados. Actúa de forma proactiva, analítica y profesional. IMPORTANTE: Para buscar clientes abandonados usa SIEMPRE la herramienta 'revisar_clientes_abandonados'. Usa SQL solo para otras consultas.",
+    tools=[buscar_clientes_por_criterio, consultar_dashboard_bi, generar_grafico_analisis, actualizar_estado_cliente, registrar_seguimiento_cliente, analizar_documento_cliente, enviar_correo_cliente, calcular_probabilidad_cierre, obtener_resumen_pipeline, exportar_datos_excel, ejecutar_consulta_sql_avanzada, revisar_clientes_abandonados]
 )
 
 # Creamos el servicio de sesión (guardará el historial en sessions.db)
@@ -373,17 +480,6 @@ session_service = DatabaseSessionService(db_url="sqlite:///sessions.db")
 
 # Creamos el Runner pasándole el servicio de sesión
 runner = Runner(agent=agente, app_name=agente.name, session_service=session_service)
-
-# --- TAREAS EN SEGUNDO PLANO (AUTOMATIZACIÓN) ---
-async def revisar_clientes_abandonados():
-    while True:
-        # Plantilla: Aquí el script se conectaría a SQL para buscar clientes inactivos > 7 días y crear alertas
-        print("🤖 [Background Task] Analizando pipeline: Revisión automática de clientes inactivos ejecutada con éxito.")
-        await asyncio.sleep(86400) # El ciclo se duerme y vuelve a ejecutarse cada 24 horas (86400 seg)
-
-@app.on_event("startup")
-async def iniciar_tareas_fondo():
-    asyncio.create_task(revisar_clientes_abandonados())
 
 # --- INTERFAZ WEB (HTML/CSS) ---
 @app.get("/", response_class=HTMLResponse)
@@ -454,6 +550,17 @@ async def chat_endpoint(request: Request):
         elif "getaddrinfo failed" in error_msg:
             return {"respuesta": "Error de red: No se pudo conectar a los servidores de Google. Verifica tu conexión a internet, VPN o configuración de proxy corporativo. 🌐"}
         return {"error": f"Error en ejecución: {error_msg}", "session_id": session_id}
+
+# --- ENDPOINT PARA SUBIR ARCHIVOS (DRAG & DROP) ---
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    try:
+        filepath = os.path.join("documentos", file.filename)
+        with open(filepath, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        return {"filename": file.filename, "mensaje": "Archivo subido correctamente"}
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)

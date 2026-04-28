@@ -20,3 +20,7 @@ matplotlib            # Para generar los gráficos que se muestran en el chat
 python-multipart      # Necesario para que FastAPI maneje formularios y subidas
 requests              # Dependencia interna necesaria para las librerías de Google Cloud y GenAI
 openpyxl              # Para exportar DataFrames a formato Excel (.xlsx)
+PyPDF2                # Para leer y extraer texto de archivos PDF reales
+python-docx           # Para leer documentos de Word (.docx)
+Pillow                # Para procesar y abrir imágenes
+pytesseract           # Motor OCR para extraer texto de imágenes

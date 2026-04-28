@@ -25,6 +25,7 @@
         .close-btn { position: absolute; top: 15px; right: 20px; font-size: 24px; cursor: pointer; color: #555; background: none; border: none; padding: 0; }
         .help-btn { background: #29b6f6; color: white; border: none; padding: 8px 15px; border-radius: 20px; cursor: pointer; font-weight: bold; margin-left: auto; transition: background 0.3s; }
         .help-btn:hover { background: #0288d1; }
+        #drag-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(12, 106, 138, 0.85); color: white; z-index: 2000; justify-content: center; align-items: center; font-size: 28px; font-weight: bold; border: 8px dashed rgba(255,255,255,0.5); box-sizing: border-box; flex-direction: column; gap: 15px; }
     </style>
     <!-- Librería de seguridad para prevenir XSS al usar innerHTML -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
@@ -32,8 +33,14 @@
 <body>
     <div id="header">
         <img src="data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23e1f5fe'/%3E%3Cline x1='50' y1='25' x2='50' y2='10' stroke='%230277bd' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='50' cy='10' r='4' fill='%23ffca28'/%3E%3Crect x='25' y='25' width='50' height='40' rx='15' fill='%2329b6f6'/%3E%3Crect x='18' y='35' width='7' height='20' rx='3' fill='%230288d1'/%3E%3Crect x='75' y='35' width='7' height='20' rx='3' fill='%230288d1'/%3E%3Crect x='30' y='30' width='40' height='30' rx='10' fill='%23ffffff'/%3E%3Ccircle cx='40' cy='42' r='4' fill='%230277bd'/%3E%3Ccircle cx='60' cy='42' r='4' fill='%230277bd'/%3E%3Ccircle cx='35' cy='50' r='3' fill='%23f48fb1' opacity='0.7'/%3E%3Ccircle cx='65' cy='50' r='3' fill='%23f48fb1' opacity='0.7'/%3E%3Cpath d='M45 52 Q50 56 55 52' stroke='%230277bd' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" alt="Robot Asistente" class="avatar">
-        <h2 style="margin: 0;"> Mi asistente virtual | Grupo Batia</h2>
+        <h2 style="margin: 0;"> Mi asistente virtual de ventas | Grupo Batia</h2>
         <button class="help-btn" onclick="openHelp()">❓ Guía de Uso</button>
+    </div>
+
+    <!-- Pantalla superpuesta para Arrastrar y Soltar -->
+    <div id="drag-overlay">
+        <span style="font-size: 60px;">📄</span>
+        Suelta tu archivo PDF, Word, Excel o Imagen aquí
     </div>
 
     <!-- Modal de Ayuda -->
@@ -48,6 +55,7 @@
                 <li>"Búscame a Ana Gómez, ¿qué información tenemos?"</li>
                 <li>"Dame una lista general de los clientes."</li>
                 <li>"¿Cuántos clientes tienen un valor mayor a $50,000? Usa SQL."</li>
+                <li>"Revisa si tengo clientes abandonados o sin seguimiento reciente."</li>
             </ul>
 
             <h3 style="color: #0c6a8a;">📊 2. Gráficos y Análisis Financiero</h3>
@@ -67,7 +75,7 @@
             <h3 style="color: #0c6a8a;">🚀 4. Capacidades Avanzadas (Módulo IA)</h3>
             <ul style="margin-top: 0;">
                 <li><strong>Dashboard BI:</strong> "Revisa el BI y dime las ventas totales."</li>
-                <li><strong>Documentos:</strong> "Lee el contrato de Batia y hazme un resumen."</li>
+                <li><strong>Documentos:</strong> "Lee el contrato en Word / Excel / PDF y hazme un resumen."</li>
                 <li><strong>Correos:</strong> "Redacta y envía un correo de seguimiento a Ana Gómez."</li>
             </ul>
         </div>
@@ -100,6 +108,56 @@
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault(); // Previene el salto de línea normal
                 sendMsg();
+            }
+        });
+
+        // --- Lógica de Drag & Drop (Arrastrar y Soltar) ---
+        const dragOverlay = document.getElementById('drag-overlay');
+        let dragCounter = 0; // Previene parpadeos al arrastrar sobre elementos hijos
+
+        document.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            dragCounter++;
+            dragOverlay.style.display = 'flex';
+        });
+
+        document.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter === 0) { dragOverlay.style.display = 'none'; }
+        });
+
+        document.addEventListener('dragover', (e) => { e.preventDefault(); });
+
+        document.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            dragOverlay.style.display = 'none';
+
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                const file = e.dataTransfer.files[0];
+                const ext = file.name.split('.').pop().toLowerCase();
+                const allowedExts = ['pdf', 'docx', 'xlsx', 'png', 'jpg', 'jpeg'];
+                if (!allowedExts.includes(ext)) {
+                    alert("Por favor, arrastra solo archivos PDF, Word (.docx), Excel (.xlsx) o Imágenes (PNG/JPG).");
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                try {
+                    const response = await fetch('/upload', { method: 'POST', body: formData });
+                    const result = await response.json();
+                    
+                    if (result.filename) {
+                        // Preparar el mensaje para el agente
+                        inputElement.value = `Lee el documento '${result.filename}' y hazme un resumen de los puntos clave.`;
+                        inputElement.focus();
+                    } else { alert("Error al subir: " + result.error); }
+                } catch(error) {
+                    alert("Error de red al intentar subir el archivo.");
+                }
             }
         });
 
