@@ -1,42 +1,26 @@
-# ADK Day Trip Planning Agent
+# Agente Comercial Batia
 
-A specialized AI agent built with Google's AI Development Kit (ADK) that generates creative and fun day trip plans based on user preferences, location, and budget constraints.
+Un agente de IA especializado construido con Google's AI Development Kit (ADK) diseñado para ayudar al equipo comercial de Grupo Batia. El agente actúa como un asistente avanzado de CRM, capaz de consultar datos, actualizar estados, generar gráficos y enviar correos.
 
-**Please make sure to check [goo.gle/advancedadk](https://goo.gle/advancedadk) to set up this project.**
+## Características Principales
 
-## Features
+- 🔍 **Búsqueda y Consulta**: Acceso en tiempo real a la base de datos de clientes en Google Cloud SQL.
+- 📈 **Análisis y Gráficos**: Generación de resúmenes financieros y gráficos visuales (Matplotlib) del pipeline.
+- ✍️ **Gestión de CRM**: Actualización de estados y registro de seguimientos de clientes.
+- 📧 **Comunicación**: Envío de correos electrónicos a clientes mediante SMTP (Office 365).
+- 🧠 **IA Avanzada**: Capacidades (simuladas/en desarrollo) de lectura de PDFs, Lead Scoring y conexión a tableros BI.
 
-- 🎯 **Personalized Planning**: Generates trip suggestions based on user interests and preferences
-- 📍 **Location-Aware**: Works with city names, addresses, or GPS coordinates
-- 💰 **Budget-Conscious**: Targets moderate budget activities (affordable yet valuable)
-- 🔍 **Real-Time Search**: Uses Google Search to find current events and venues
-- 📅 **Date-Specific**: Plans activities for specific weekend dates
-- 🎨 **Creative Suggestions**: Maximum 3 distinct activities per plan with detailed location information
+## Requisitos Previos
 
-## Tutorial
+- Python 3.8 o superior.
+- Credenciales de Google Cloud y acceso a la base de datos Cloud SQL.
 
-For a guided walkthrough of how to set up this project, please refer to the [tutorial](https://goo.gle/advancedadk).
+## Configuración Rápida
 
-## Prerequisites
-
-- Python 3.8 or higher
-- Google Cloud SDK installed and authenticated (`gcloud auth login`)
-
-## Quick Setup
-
-This project uses a setup script to configure the environment automatically. Simply run the script for your operating system.
-
-### For Mac/Linux Users
+Instala las dependencias y activa tu entorno virtual:
 
 ```bash
-chmod +x setup_venv.sh
-./setup_venv.sh
-```
-
-### For Windows Users
-
-```cmd
-setup_venv.bat
+pip install -r requirements.txt
 ```
 
 ### What the Script Does
