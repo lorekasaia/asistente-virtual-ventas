@@ -104,6 +104,30 @@ def buscar_clientes_por_criterio(termino_busqueda: str = "") -> str:
         print(f"Error al consultar Cloud SQL: {e}")
         return f"Hubo un error al conectar con la base de datos: {e}. Por favor, verifica la configuración."
 
+def obtener_resumen_pipeline() -> str:
+    """
+    Obtiene un resumen estadístico y financiero del pipeline actual de ventas.
+    Calcula el valor total por estado, promedios y cuenta la cantidad de clientes.
+    """
+    try:
+        df = consultar_cloud_sql("")
+        if df.empty:
+            return "No hay datos suficientes para generar un resumen."
+        
+        if '_estado' in df.columns and 'valor_estimado' in df.columns:
+            df['estado_texto'] = df['_estado'].map(MAPA_ESTADOS).fillna('Desconocido')
+            resumen = df.groupby('estado_texto').agg(
+                cantidad_clientes=('id', 'count'),
+                valor_total_mxn=('valor_estimado', 'sum'),
+                ticket_promedio=('valor_estimado', 'mean')
+            ).reset_index()
+            
+            return "Resumen Financiero del Pipeline:\n" + resumen.to_json(orient="records", force_ascii=False)
+        else:
+            return "La base de datos no contiene las columnas de valor o estado necesarias para este análisis."
+    except Exception as e:
+        return f"Error al generar el resumen estadístico: {e}"
+
 def consultar_dashboard_bi(kpi: str, contexto: str = "general") -> str:
     """
     Consulta la API de Business Intelligence corporativa (ej. Power BI / Looker) para obtener métricas agregadas avanzadas y KPIs.
@@ -296,8 +320,8 @@ def calcular_probabilidad_cierre(nombre_cliente: str) -> str:
 agente = adk.Agent(
     name="BatiaCommercialAgent",
     model="gemini-2.5-flash",
-    instruction="Eres el asistente avanzado de Lore en Grupo Batia. Capacidades: 1) Buscar clientes, 2) Consultar BI, 3) Generar gráficos HTML (<img>), 4) Actualizar estados, 5) Registrar seguimientos, 6) Analizar PDFs, 7) Enviar correos, y 8) Calcular Lead Scoring. Actúa de forma proactiva y profesional.",
-    tools=[buscar_clientes_por_criterio, consultar_dashboard_bi, generar_grafico_analisis, actualizar_estado_cliente, registrar_seguimiento_cliente, analizar_documento_cliente, enviar_correo_cliente, calcular_probabilidad_cierre]
+    instruction="Eres el asistente avanzado de Lore en Grupo Batia. Capacidades: 1) Buscar clientes, 2) Consultar BI, 3) Generar gráficos HTML (<img>), 4) Actualizar estados, 5) Registrar seguimientos, 6) Analizar PDFs, 7) Enviar correos, 8) Calcular Lead Scoring, y 9) Obtener resúmenes financieros del pipeline. Actúa de forma proactiva, analítica y profesional.",
+    tools=[buscar_clientes_por_criterio, consultar_dashboard_bi, generar_grafico_analisis, actualizar_estado_cliente, registrar_seguimiento_cliente, analizar_documento_cliente, enviar_correo_cliente, calcular_probabilidad_cierre, obtener_resumen_pipeline]
 )
 
 # Creamos el servicio de sesión (guardará el historial en sessions.db)
