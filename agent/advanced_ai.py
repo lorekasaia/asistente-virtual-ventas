@@ -11,6 +11,7 @@ from google import adk
 from database import consultar_cloud_sql, MAPA_ESTADOS
 import urllib.request
 import json
+import urllib.parse
 
 def analizar_documento_cliente(nombre_cliente: str, tipo_documento: str) -> str:
     carpeta = "documentos"
@@ -109,7 +110,8 @@ def calcular_probabilidad_cierre(nombre_cliente: str) -> str:
 def consultar_clima_ciudad(ciudad: str) -> str:
     """Consulta el clima actual de una ciudad usando una API pública."""
     try:
-        url = f"https://wttr.in/{ciudad.replace(' ', '%20')}?format=j1"
+        ciudad_codificada = urllib.parse.quote(ciudad.strip())
+        url = f"https://wttr.in/{ciudad_codificada}?format=j1"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=5) as response:
             data = json.loads(response.read().decode('utf-8'))
