@@ -67,47 +67,49 @@ def generar_grafico_analisis(metrica: str) -> str:
             metrica_limpia = "conversion"
         # --- Fin de la normalización ---
 
-        plt.figure(figsize=(8, 6))
+        # Usamos la API orientada a objetos (fig, ax) para evitar colisiones entre usuarios concurrentes
+        fig, ax = plt.subplots(figsize=(8, 6))
+        
         if metrica_limpia == "prioridad" and 'prioridad' in df.columns:
             conteo = df['prioridad'].value_counts()
-            conteo.plot(kind='bar', color=['#4CAF50', '#FF9800', '#F44336'])
-            plt.title("Distribución de Clientes por Prioridad")
-            plt.xlabel("Nivel de Prioridad")
-            plt.ylabel("Cantidad de Clientes")
-            plt.xticks(rotation=0)
+            conteo.plot(kind='bar', color=['#4CAF50', '#FF9800', '#F44336'], ax=ax)
+            ax.set_title("Distribución de Clientes por Prioridad")
+            ax.set_xlabel("Nivel de Prioridad")
+            ax.set_ylabel("Cantidad de Clientes")
+            ax.tick_params(axis='x', rotation=0)
         elif metrica_limpia == "estado" and '_estado' in df.columns:
             estados_texto = df['_estado'].map(MAPA_ESTADOS).fillna('Otro (' + df['_estado'].astype(str) + ')')
             conteo = estados_texto.value_counts()
-            conteo.plot(kind='pie', autopct='%1.1f%%', startangle=90)
-            plt.title("Proporción de Clientes por Estado Interno")
-            plt.ylabel("")
+            conteo.plot(kind='pie', autopct='%1.1f%%', startangle=90, ax=ax)
+            ax.set_title("Proporción de Clientes por Estado Interno")
+            ax.set_ylabel("")
         elif metrica_limpia == "valor" and 'valor_estimado' in df.columns and '_estado' in df.columns:
             df['estado_texto'] = df['_estado'].map(MAPA_ESTADOS).fillna('Otro')
             suma_valor = df.groupby('estado_texto')['valor_estimado'].sum().sort_values(ascending=False)
-            suma_valor.plot(kind='bar', color='#2196F3')
-            plt.title("Valor Estimado ($) del Pipeline por Estado")
-            plt.xlabel("Estado del Cliente")
-            plt.ylabel("Valor Estimado Total")
-            plt.xticks(rotation=45, ha='right')
+            suma_valor.plot(kind='bar', color='#2196F3', ax=ax)
+            ax.set_title("Valor Estimado ($) del Pipeline por Estado")
+            ax.set_xlabel("Estado del Cliente")
+            ax.set_ylabel("Valor Estimado Total")
+            ax.tick_params(axis='x', rotation=45)
         elif metrica_limpia == "fuente" and 'fuente' in df.columns:
             conteo = df['fuente'].fillna('Desconocido').value_counts()
-            conteo.sort_values().plot(kind='barh', color='#9C27B0')
-            plt.title("Origen de los Prospectos (Fuentes)")
-            plt.xlabel("Cantidad de Clientes")
-            plt.ylabel("Fuente")
+            conteo.sort_values().plot(kind='barh', color='#9C27B0', ax=ax)
+            ax.set_title("Origen de los Prospectos (Fuentes)")
+            ax.set_xlabel("Cantidad de Clientes")
+            ax.set_ylabel("Fuente")
         elif metrica_limpia == "conversion" and 'es_cliente' in df.columns:
             conteo = df['es_cliente'].map({True: 'Cliente Cerrado', False: 'Prospecto Activo'}).value_counts()
-            conteo.plot(kind='pie', autopct='%1.1f%%', startangle=90, colors=['#00BCD4', '#FFC107'])
-            plt.title("Tasa de Conversión General")
-            plt.ylabel("")
+            conteo.plot(kind='pie', autopct='%1.1f%%', startangle=90, colors=['#00BCD4', '#FFC107'], ax=ax)
+            ax.set_title("Tasa de Conversión General")
+            ax.set_ylabel("")
         else:
             return f"No se pudo generar el gráfico para la métrica '{metrica}'. Las métricas permitidas son: 'prioridad', 'estado', 'valor', 'fuente' y 'conversion'. Si el usuario pide 'todas', debes ejecutar esta herramienta 5 veces seguidas (una por cada métrica permitida)."
         
         filename = f"grafico_{uuid.uuid4().hex[:8]}.png"
         filepath = os.path.join("graficos", filename)
-        plt.savefig(filepath, bbox_inches='tight')
-        plt.close()
-        return f"Gráfico generado con éxito. DEBES responder esto al usuario exactamente así para que vea la imagen: <br><img src='/graficos/{filename}' alt='Gráfico de {metrica}' style='max-width: 100%; border-radius: 8px; margin-top: 10px;'/>"
+        fig.savefig(filepath, bbox_inches='tight')
+        plt.close(fig) # Se asegura de liberar los recursos solo de esta figura
+        return f"Gráfico generado con éxito. DEBES responder esto al usuario exactamente así para que vea la imagen: <br><img src='/graficos/{filename}' alt='Gráfico de {metrica_limpia}' style='max-width: 100%; border-radius: 8px; margin-top: 10px;'/>"
     except Exception as e:
         return f"Error al procesar y graficar los datos: {e}"
 

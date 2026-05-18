@@ -8,6 +8,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from google import adk
 from google.adk.runners import Runner
 import matplotlib
@@ -16,6 +17,8 @@ matplotlib.use('Agg')
 
 import uuid
 import shutil
+import time
+import logging
 from google import genai
 
 from google.adk.sessions import DatabaseSessionService
@@ -29,6 +32,14 @@ from data_query import data_query_agent
 from analytics import analytics_agent
 from crm import crm_agent
 from advanced_ai import advanced_ai_agent
+
+# --- CONFIGURACIÓN DE LOGGING ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - [%(levelname)s] - %(message)s",
+    handlers=[logging.StreamHandler(), logging.FileHandler("app_agent.log", encoding="utf-8")]
+)
+logger = logging.getLogger("BatiaAgent")
 
 # --- INYECCIÓN DE PERSONALIDAD COMERCIAL ESPECIALIZADA ---
 SALES_PERSONA = """
@@ -69,6 +80,16 @@ analytics_agent.instruction = (analytics_agent.instruction or "") + "\n\n" + SEC
 
 app = FastAPI(title="Batia Agent UI")
 
+# --- CONFIGURACIÓN DE CORS ---
+# Permite incrustar el chat web en otros dominios (ej. el portal principal de la empresa)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # En producción cambiar por un dominio estricto como ["https://www.batia.com.mx"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Crear carpeta para guardar los gráficos generados y montarla en la web
 os.makedirs("graficos", exist_ok=True)
 app.mount("/graficos", StaticFiles(directory="graficos"), name="graficos")
@@ -79,6 +100,33 @@ app.mount("/reportes", StaticFiles(directory="reportes"), name="reportes")
 
 # Crear carpeta para los documentos PDF de los clientes
 os.makedirs("documentos", exist_ok=True)
+
+# --- TAREA DE LIMPIEZA EN SEGUNDO PLANO ---
+async def limpiar_archivos_antiguos():
+    """Elimina archivos temporales generados hace más de 24 horas para evitar llenar el disco duro."""
+    directorios = ["graficos", "reportes", "documentos"]
+    max_edad_segundos = 86400  # 24 horas
+    while True:
+        ahora = time.time()
+        for directorio in directorios:
+            if not os.path.exists(directorio):
+                continue
+            for filename in os.listdir(directorio):
+                filepath = os.path.join(directorio, filename)
+                if os.path.isfile(filepath):
+                    # Si la fecha de modificación (mtime) excede las 24 horas
+                    if ahora - os.path.getmtime(filepath) > max_edad_segundos:
+                        try:
+                            os.remove(filepath)
+                            logger.info(f"[Mantenimiento] Archivo temporal eliminado: {filepath}")
+                        except Exception:
+                            pass
+        await asyncio.sleep(3600)  # Pausa de 1 hora antes del próximo escaneo
+
+@app.on_event("startup")
+async def startup_event():
+    # Lanzar la tarea de limpieza en segundo plano cuando arranca FastAPI
+    asyncio.create_task(limpiar_archivos_antiguos())
 
 # 5. Agente Orquestador (Manager)
 orchestrator_agent = adk.Agent(
@@ -150,7 +198,7 @@ async def route_to_agent(prompt: str, session_id: str) -> str:
         # Verificación flexible por si el modelo añade alguna puntuación extra
         for key in AGENTS.keys():
             if key in category:
-                print(f"[Orquestador] Tarea delegada al agente: {key}")
+                logger.info(f"[Orquestador] Tarea delegada al agente: {key}")
                 if len(LAST_AGENT_CACHE) >= MAX_CACHE_SIZE:
                     # Evitar fuga de memoria borrando el registro más antiguo (FIFO)
                     LAST_AGENT_CACHE.pop(next(iter(LAST_AGENT_CACHE)))
@@ -158,11 +206,11 @@ async def route_to_agent(prompt: str, session_id: str) -> str:
                 return key
                 
         fallback = last_agent or "DATA_QUERY"
-        print(f"[Orquestador] Clasificación inesperada: '{category}'. Usando '{fallback}' por defecto.")
+        logger.warning(f"[Orquestador] Clasificación inesperada: '{category}'. Usando '{fallback}' por defecto.")
         return fallback
     except Exception as e:
         fallback = last_agent or "DATA_QUERY"
-        print(f"[Orquestador] Error al enrutar: {e}. Usando '{fallback}' por defecto.")
+        logger.error(f"[Orquestador] Error al enrutar: {e}. Usando '{fallback}' por defecto.", exc_info=True)
         return fallback
 
 # --- INTERFAZ WEB (HTML/CSS) ---
@@ -244,12 +292,22 @@ async def chat_endpoint(request: Request):
 
 # --- ENDPOINT PARA SUBIR ARCHIVOS (DRAG & DROP) ---
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+def upload_file(file: UploadFile = File(...)):
+    # Al usar 'def' en lugar de 'async def', FastAPI ejecuta esta función bloqueante en un hilo separado
     try:
-        filepath = os.path.join("documentos", file.filename)
+        # 1. Sanitizar el nombre del archivo para evitar vulnerabilidades de Path Traversal
+        seguro_filename = os.path.basename(file.filename)
+        
+        # 2. Validar que la extensión sea segura y soportada por el AdvancedAIAgent
+        extensiones_permitidas = {'.pdf', '.docx', '.xlsx', '.png', '.jpg', '.jpeg'}
+        _, ext = os.path.splitext(seguro_filename)
+        if ext.lower() not in extensiones_permitidas:
+            return {"error": f"Tipo de archivo no permitido. Solo se aceptan: {', '.join(extensiones_permitidas)}"}
+
+        filepath = os.path.join("documentos", seguro_filename)
         with open(filepath, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        return {"filename": file.filename, "mensaje": "Archivo subido correctamente"}
+        return {"filename": seguro_filename, "mensaje": "Archivo subido correctamente"}
     except Exception as e:
         return {"error": str(e)}
 
