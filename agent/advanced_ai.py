@@ -9,6 +9,8 @@ from PIL import Image
 import pytesseract
 from google import adk
 from database import consultar_cloud_sql, MAPA_ESTADOS
+import urllib.request
+import json
 
 def analizar_documento_cliente(nombre_cliente: str, tipo_documento: str) -> str:
     carpeta = "documentos"
@@ -104,9 +106,33 @@ def calcular_probabilidad_cierre(nombre_cliente: str) -> str:
     except Exception as e:
         return f"Error al calcular el Lead Scoring: {e}"
 
+def consultar_clima_ciudad(ciudad: str) -> str:
+    """Consulta el clima actual de una ciudad usando una API pública."""
+    try:
+        url = f"https://wttr.in/{ciudad.replace(' ', '%20')}?format=j1"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            condicion = data['current_condition'][0]
+            desc = condicion['weatherDesc'][0]['value']
+            return f"Clima actual en {ciudad}: {desc}, Temp: {condicion['temp_C']}°C, Humedad: {condicion['humidity']}%."
+    except Exception as e:
+        return f"Asume el clima típico y geográfico de {ciudad}. (No se pudo conectar a la API del clima: {e})"
+
+def generar_propuesta_venta(nombre_cliente: str, industria: str, ciudad: str) -> str:
+    """Herramienta para recopilar contexto (clima, industria) antes de generar una propuesta de ventas."""
+    clima_info = consultar_clima_ciudad(ciudad)
+    return (
+        f"INFORMACIÓN RECOPILADA PARA LA PROPUESTA:\n"
+        f"- Cliente: {nombre_cliente}\n"
+        f"- Sector/Industria: {industria}\n"
+        f"- Clima de su ciudad: {clima_info}\n\n"
+        f"INSTRUCCIÓN INTERNA: Con estos datos, redacta ahora mismo la propuesta de valor adaptada al clima y a las necesidades operativas de su industria."
+    )
+
 advanced_ai_agent = adk.Agent(
     name="AdvancedAIAgent",
     model="gemini-2.5-flash",
-    instruction="Eres un especialista en tareas complejas de IA. Tus funciones son: analizar documentos (PDF, Word, Excel, Imagen), enviar correos electrónicos reales y calcular la probabilidad de cierre (Lead Scoring). Eres detallado y analítico en tus respuestas.",
-    tools=[analizar_documento_cliente, enviar_correo_cliente, calcular_probabilidad_cierre]
+    instruction="Eres un especialista en tareas complejas de IA. Tus funciones son: analizar documentos, enviar correos reales, calcular la probabilidad de cierre (Lead Scoring) y estructurar propuestas usando la herramienta generar_propuesta_venta. Eres detallado y analítico.",
+    tools=[analizar_documento_cliente, enviar_correo_cliente, calcular_probabilidad_cierre, consultar_clima_ciudad, generar_propuesta_venta]
 )
