@@ -26,8 +26,6 @@ def actualizar_estado_cliente(nombre_cliente: str, nuevo_estado_texto: str) -> s
             return f"¡Éxito! El cliente '{nombre_cliente}' ha sido actualizado al estado '{nuevo_estado_texto}' (ID: {estado_id})."
     except Exception as e:
         return f"Error al actualizar la base de datos: {e}"
-    finally:
-        connector.close()
 
 def registrar_seguimiento_cliente(nombre_cliente: str, tipo_contacto: str, descripcion: str) -> str:
     engine, connector = obtener_motor_bd()
@@ -46,8 +44,6 @@ def registrar_seguimiento_cliente(nombre_cliente: str, tipo_contacto: str, descr
             return f"¡Éxito! Se ha registrado el seguimiento tipo '{tipo_contacto}' para el cliente '{nombre_cliente}'."
     except Exception as e:
         return f"Error al registrar el seguimiento en la base de datos: {e}"
-    finally:
-        connector.close()
 
 crm_agent = adk.Agent(
     name="CRMAgent",

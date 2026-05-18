@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 import sqlalchemy
 from google import adk
@@ -12,8 +13,23 @@ def buscar_clientes_por_criterio(termino_busqueda: str = "") -> str:
         return f"Hubo un error al conectar con la base de datos: {e}. Por favor, verifica la configuración."
 
 def ejecutar_consulta_sql_avanzada(query_sql: str) -> str:
-    if not query_sql.strip().upper().startswith("SELECT"):
+    query_limpia = query_sql.strip().upper()
+    if not query_limpia.startswith("SELECT"):
         return "Error de seguridad: SÓLO se permiten consultas de tipo SELECT. No puedes modificar la base de datos."
+    
+    # Bloquear ejecución de múltiples sentencias para evitar inyecciones apiladas
+    if ";" in query_limpia:
+        return "Error de seguridad: No se permiten múltiples sentencias SQL (uso de punto y coma)."
+        
+    # Bloquear palabras clave que modifican el esquema o los datos (DML/DDL)
+    palabras_prohibidas = r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT|REVOKE|EXEC|EXECUTE|MERGE|CALL|COMMIT|ROLLBACK|REPLACE)\b"
+    if re.search(palabras_prohibidas, query_limpia):
+        return "Error de seguridad: La consulta contiene comandos de escritura o modificación no permitidos."
+        
+    # Bloquear acceso a tablas del sistema de PostgreSQL y funciones peligrosas (Exfiltración de metadatos / DoS / LFI)
+    palabras_sistema = r"\b(PG_[A-Z0-9_]+|INFORMATION_SCHEMA)\b"
+    if re.search(palabras_sistema, query_limpia):
+        return "Error de seguridad: No está permitido consultar catálogos del sistema ni usar funciones internas de PostgreSQL."
     
     engine, connector = obtener_motor_bd()
     try:
@@ -24,8 +40,6 @@ def ejecutar_consulta_sql_avanzada(query_sql: str) -> str:
             return "Resultado de la consulta SQL (Mostrando max 50 filas):\n" + df.head(50).to_string()
     except Exception as e:
         return f"Error de sintaxis o ejecución SQL: {e}"
-    finally:
-        connector.close()
 
 def revisar_clientes_abandonados() -> str:
     engine, connector = obtener_motor_bd()
@@ -44,8 +58,6 @@ def revisar_clientes_abandonados() -> str:
         return alertas + "\nTe sugiero darles seguimiento hoy mismo."
     except Exception as e:
         return f"Error al revisar clientes abandonados: {e}"
-    finally:
-        connector.close()
 
 data_query_agent = adk.Agent(
     name="DataQueryAgent",

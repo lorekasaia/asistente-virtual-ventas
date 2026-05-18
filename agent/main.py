@@ -126,6 +126,7 @@ RUNNERS = {
 
 # Memoria temporal para saber qué agente estaba usando cada sesión
 LAST_AGENT_CACHE = {}
+MAX_CACHE_SIZE = 1000
 
 async def route_to_agent(prompt: str, session_id: str) -> str:
     """Usa el OrchestratorAgent para clasificar el prompt y dirigirlo al especialista."""
@@ -150,6 +151,9 @@ async def route_to_agent(prompt: str, session_id: str) -> str:
         for key in AGENTS.keys():
             if key in category:
                 print(f"[Orquestador] Tarea delegada al agente: {key}")
+                if len(LAST_AGENT_CACHE) >= MAX_CACHE_SIZE:
+                    # Evitar fuga de memoria borrando el registro más antiguo (FIFO)
+                    LAST_AGENT_CACHE.pop(next(iter(LAST_AGENT_CACHE)))
                 LAST_AGENT_CACHE[session_id] = key
                 return key
                 
