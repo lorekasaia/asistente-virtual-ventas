@@ -19,10 +19,12 @@ import uuid
 import shutil
 import time
 import logging
+from contextlib import asynccontextmanager
 from google import genai
 
 from google.adk.sessions import DatabaseSessionService
 
+from database import cerrar_conexion_bd
 from google.genai.types import Content, Part
 import uvicorn
 import asyncio
@@ -78,29 +80,6 @@ advanced_ai_agent.instruction = (advanced_ai_agent.instruction or "") + "\n\n" +
 data_query_agent.instruction = (data_query_agent.instruction or "") + "\n\n" + SECURITY_PROMPT
 analytics_agent.instruction = (analytics_agent.instruction or "") + "\n\n" + SECURITY_PROMPT
 
-app = FastAPI(title="Batia Agent UI")
-
-# --- CONFIGURACIÓN DE CORS ---
-# Permite incrustar el chat web en otros dominios (ej. el portal principal de la empresa)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # En producción cambiar por un dominio estricto como ["https://www.batia.com.mx"]
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Crear carpeta para guardar los gráficos generados y montarla en la web
-os.makedirs("graficos", exist_ok=True)
-app.mount("/graficos", StaticFiles(directory="graficos"), name="graficos")
-
-# Crear carpeta para guardar los reportes de Excel generados y montarla en la web
-os.makedirs("reportes", exist_ok=True)
-app.mount("/reportes", StaticFiles(directory="reportes"), name="reportes")
-
-# Crear carpeta para los documentos PDF de los clientes
-os.makedirs("documentos", exist_ok=True)
-
 # --- TAREA DE LIMPIEZA EN SEGUNDO PLANO ---
 async def limpiar_archivos_antiguos():
     """Elimina archivos temporales generados hace más de 24 horas para evitar llenar el disco duro."""
@@ -123,10 +102,40 @@ async def limpiar_archivos_antiguos():
                             pass
         await asyncio.sleep(3600)  # Pausa de 1 hora antes del próximo escaneo
 
-@app.on_event("startup")
-async def startup_event():
-    # Lanzar la tarea de limpieza en segundo plano cuando arranca FastAPI
-    asyncio.create_task(limpiar_archivos_antiguos())
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 1. Tareas a ejecutar al INICIAR el servidor
+    limpieza_task = asyncio.create_task(limpiar_archivos_antiguos())
+    yield
+    # 2. Tareas a ejecutar al APAGAR el servidor (cierre limpio y seguro)
+    limpieza_task.cancel()
+    cerrar_conexion_bd()
+
+app = FastAPI(title="Batia Agent UI", lifespan=lifespan)
+
+# Cliente global de GenAI para reutilizar conexiones HTTP y reducir latencia
+ai_client = genai.Client()
+
+# --- CONFIGURACIÓN DE CORS ---
+# Permite incrustar el chat web en otros dominios (ej. el portal principal de la empresa)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # En producción cambiar por un dominio estricto como ["https://www.batia.com.mx"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Crear carpeta para guardar los gráficos generados y montarla en la web
+os.makedirs("graficos", exist_ok=True)
+app.mount("/graficos", StaticFiles(directory="graficos"), name="graficos")
+
+# Crear carpeta para guardar los reportes de Excel generados y montarla en la web
+os.makedirs("reportes", exist_ok=True)
+app.mount("/reportes", StaticFiles(directory="reportes"), name="reportes")
+
+# Crear carpeta para los documentos PDF de los clientes
+os.makedirs("documentos", exist_ok=True)
 
 # 5. Agente Orquestador (Manager)
 orchestrator_agent = adk.Agent(
@@ -176,6 +185,10 @@ RUNNERS = {
 LAST_AGENT_CACHE = {}
 MAX_CACHE_SIZE = 1000
 
+# Control de Spam y abusos (Rate Limiting en memoria)
+REQUEST_TIMESTAMPS = {}
+RATE_LIMIT_SECONDS = 2.0
+
 async def route_to_agent(prompt: str, session_id: str) -> str:
     """Usa el OrchestratorAgent para clasificar el prompt y dirigirlo al especialista."""
     last_agent = LAST_AGENT_CACHE.get(session_id)
@@ -186,9 +199,8 @@ async def route_to_agent(prompt: str, session_id: str) -> str:
         context_prompt = f"[Contexto: El agente anterior usado en esta sesión fue {last_agent}. Si la siguiente frase es una respuesta corta o continuación, elige {last_agent}]\n\nFrase del usuario: {prompt}"
 
     try:
-        # Instanciamos el cliente del nuevo SDK (google.genai)
-        client = genai.Client()
-        response = await client.aio.models.generate_content(
+        # Reutilizamos el cliente global para evitar overhead de red
+        response = await ai_client.aio.models.generate_content(
             model=orchestrator_agent.model,
             contents=context_prompt,
             config=genai.types.GenerateContentConfig(system_instruction=orchestrator_agent.instruction)
@@ -237,6 +249,20 @@ async def chat_endpoint(request: Request):
         session_id = f"web-session-{uuid.uuid4()}"
     if not prompt:
         return {"error": "No se recibió ningún prompt."}
+        
+    # Límite estricto de caracteres para prevenir ataques "Denial of Wallet" (agotamiento de tokens)
+    if len(prompt) > 4000:
+        return {"respuesta": "Tu mensaje es demasiado largo. Por favor, resúmelo en menos de 4000 caracteres.", "session_id": session_id}
+        
+    # Aplicar Rate Limiting estricto por Dirección IP del Cliente (Anti-Bot/DDoS)
+    ahora = time.time()
+    cliente_ip = request.client.host if request.client else "127.0.0.1"
+    ultimo_request = REQUEST_TIMESTAMPS.get(cliente_ip, 0)
+    if ahora - ultimo_request < RATE_LIMIT_SECONDS:
+        return {"respuesta": "Estás enviando mensajes muy rápido. Por favor, espera un par de segundos y vuelve a intentarlo. ⏳", "session_id": session_id}
+    REQUEST_TIMESTAMPS[cliente_ip] = ahora
+    if len(REQUEST_TIMESTAMPS) > MAX_CACHE_SIZE:
+        REQUEST_TIMESTAMPS.pop(next(iter(REQUEST_TIMESTAMPS)))
     
     try:
         # 1. Enrutar el prompt al agente correcto
@@ -284,25 +310,38 @@ async def chat_endpoint(request: Request):
             
     except Exception as e:
         error_msg = str(e)
+        logger.error(f"Error crítico en endpoint /chat: {error_msg}", exc_info=True)
         if "503" in error_msg and "UNAVAILABLE" in error_msg:
             return {"respuesta": "El agente está experimentando una alta demanda en los servidores de Google en este momento. Por favor, espera un par de minutos y vuelve a intentarlo. ⏳"}
         elif "getaddrinfo failed" in error_msg:
             return {"respuesta": "Error de red: No se pudo conectar a los servidores de Google. Verifica tu conexión a internet, VPN o configuración de proxy corporativo. 🌐"}
-        return {"error": f"Error en ejecución: {error_msg}", "session_id": session_id}
+        return {"error": "Ocurrió un error interno en el servidor. El equipo técnico ya fue notificado a través de los logs.", "session_id": session_id}
 
 # --- ENDPOINT PARA SUBIR ARCHIVOS (DRAG & DROP) ---
 @app.post("/upload")
 def upload_file(file: UploadFile = File(...)):
     # Al usar 'def' en lugar de 'async def', FastAPI ejecuta esta función bloqueante en un hilo separado
     try:
-        # 1. Sanitizar el nombre del archivo para evitar vulnerabilidades de Path Traversal
-        seguro_filename = os.path.basename(file.filename)
+        # 1. Sanitizar el nombre del archivo y evitar colisiones/sobreescrituras (Cross-Tenant Data Leak)
+        nombre_base = os.path.basename(file.filename)
+        prefijo_unico = uuid.uuid4().hex[:6]
+        seguro_filename = f"{prefijo_unico}-{nombre_base}"
         
-        # 2. Validar que la extensión sea segura y soportada por el AdvancedAIAgent
+        # 2. Validar extensión segura
         extensiones_permitidas = {'.pdf', '.docx', '.xlsx', '.png', '.jpg', '.jpeg'}
         _, ext = os.path.splitext(seguro_filename)
         if ext.lower() not in extensiones_permitidas:
             return {"error": f"Tipo de archivo no permitido. Solo se aceptan: {', '.join(extensiones_permitidas)}"}
+            
+        # 3. Validar MIME type real para prevenir spoofing (ej. un .exe renombrado a .pdf)
+        mime_permitidos = [
+            'application/pdf', 
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'image/png', 'image/jpeg'
+        ]
+        if file.content_type not in mime_permitidos:
+            return {"error": "El contenido interno del archivo no coincide con su extensión o no es seguro."}
 
         filepath = os.path.join("documentos", seguro_filename)
         with open(filepath, "wb") as buffer:

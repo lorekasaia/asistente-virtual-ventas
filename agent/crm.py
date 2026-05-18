@@ -1,6 +1,9 @@
+import logging
 import sqlalchemy
 from google import adk
 from database import obtener_motor_bd, MAPA_ESTADOS, MAPA_ESTADOS_INVERSO
+
+logger = logging.getLogger("BatiaAgent")
 
 def _obtener_id_cliente(conn, nombre_cliente: str):
     """Función auxiliar para buscar el ID de un cliente de forma única."""
@@ -31,6 +34,7 @@ def actualizar_estado_cliente(nombre_cliente: str, nuevo_estado_texto: str) -> s
 
             return f"¡Éxito! El cliente '{nombre_cliente}' ha sido actualizado al estado '{nuevo_estado_texto}' (ID: {estado_id})."
     except Exception as e:
+        logger.error(f"Error en actualizar_estado_cliente: {e}", exc_info=True)
         return f"Error al actualizar la base de datos: {e}"
 
 def registrar_seguimiento_cliente(nombre_cliente: str, tipo_contacto: str, descripcion: str) -> str:
@@ -47,6 +51,7 @@ def registrar_seguimiento_cliente(nombre_cliente: str, tipo_contacto: str, descr
             conn.execute(insert_query, {"cliente_id": cliente_id, "usuario_id": usuario_sistema_id, "tipo": tipo_contacto, "descripcion": descripcion})
             return f"¡Éxito! Se ha registrado el seguimiento tipo '{tipo_contacto}' para el cliente '{nombre_cliente}'."
     except Exception as e:
+        logger.error(f"Error en registrar_seguimiento_cliente: {e}", exc_info=True)
         return f"Error al registrar el seguimiento en la base de datos: {e}"
 
 crm_agent = adk.Agent(

@@ -1,15 +1,22 @@
 import re
+import logging
 import pandas as pd
 import sqlalchemy
 from google import adk
 from database import obtener_motor_bd, consultar_cloud_sql, MAPA_ESTADOS
+
+logger = logging.getLogger("BatiaAgent")
+
+# Compilación de Regex a nivel global para optimizar el rendimiento del CPU
+PATRON_PROHIBIDO_DML = re.compile(r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT|REVOKE|EXEC|EXECUTE|MERGE|CALL|COMMIT|ROLLBACK|REPLACE)\b")
+PATRON_SISTEMA_PG = re.compile(r"\b(PG_[A-Z0-9_]+|INFORMATION_SCHEMA)\b")
 
 def buscar_clientes_por_criterio(termino_busqueda: str = "") -> str:
     try:
         df = consultar_cloud_sql(termino_busqueda)
         return df.to_string() if not df.empty else "No se encontraron resultados en la base de datos de producción."
     except Exception as e:
-        print(f"Error al consultar Cloud SQL: {e}")
+        logger.error(f"Error en buscar_clientes_por_criterio: {e}", exc_info=True)
         return f"Hubo un error al conectar con la base de datos: {e}. Por favor, verifica la configuración."
 
 def ejecutar_consulta_sql_avanzada(query_sql: str) -> str:
@@ -22,23 +29,25 @@ def ejecutar_consulta_sql_avanzada(query_sql: str) -> str:
         return "Error de seguridad: No se permiten múltiples sentencias SQL (uso de punto y coma)."
         
     # Bloquear palabras clave que modifican el esquema o los datos (DML/DDL)
-    palabras_prohibidas = r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT|REVOKE|EXEC|EXECUTE|MERGE|CALL|COMMIT|ROLLBACK|REPLACE)\b"
-    if re.search(palabras_prohibidas, query_limpia):
+    if PATRON_PROHIBIDO_DML.search(query_limpia):
         return "Error de seguridad: La consulta contiene comandos de escritura o modificación no permitidos."
         
     # Bloquear acceso a tablas del sistema de PostgreSQL y funciones peligrosas (Exfiltración de metadatos / DoS / LFI)
-    palabras_sistema = r"\b(PG_[A-Z0-9_]+|INFORMATION_SCHEMA)\b"
-    if re.search(palabras_sistema, query_limpia):
+    if PATRON_SISTEMA_PG.search(query_limpia):
         return "Error de seguridad: No está permitido consultar catálogos del sistema ni usar funciones internas de PostgreSQL."
     
     engine, connector = obtener_motor_bd()
     try:
         with engine.connect() as conn:
-            df = pd.read_sql(sqlalchemy.text(query_sql), con=conn)
-            if df.empty:
-                 return "La consulta se ejecutó correctamente pero no arrojó resultados."
-            return "Resultado de la consulta SQL (Mostrando max 50 filas):\n" + df.head(50).to_string()
+            # fetchmany(50) evita que Pandas colapse la RAM si la IA consulta tablas gigantes
+            result = conn.execute(sqlalchemy.text(query_sql))
+            rows = result.fetchmany(50)
+            if not rows:
+                return "La consulta se ejecutó correctamente pero no arrojó resultados."
+            df = pd.DataFrame(rows, columns=result.keys())
+            return "Resultado de la consulta SQL (Mostrando max 50 filas):\n" + df.to_string()
     except Exception as e:
+        logger.error(f"Error en ejecutar_consulta_sql_avanzada: {e}", exc_info=True)
         return f"Error de sintaxis o ejecución SQL: {e}"
 
 def revisar_clientes_abandonados() -> str:
@@ -57,6 +66,7 @@ def revisar_clientes_abandonados() -> str:
             alertas += f"- **{row[0]}** de {row[1]} (Etapa actual: {estado_txt})\n"
         return alertas + "\nTe sugiero darles seguimiento hoy mismo."
     except Exception as e:
+        logger.error(f"Error en revisar_clientes_abandonados: {e}", exc_info=True)
         return f"Error al revisar clientes abandonados: {e}"
 
 data_query_agent = adk.Agent(

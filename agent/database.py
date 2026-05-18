@@ -35,19 +35,35 @@ def obtener_motor_bd():
         _connector = Connector()
         def getconn():
             return _connector.connect(instance_connection_name, "pg8000", user=db_user, password=db_pass, db=db_name, ip_type=IPTypes.PUBLIC)
-        # Se define un pool de conexiones optimizado
-        _engine = sqlalchemy.create_engine("postgresql+pg8000://", creator=getconn, pool_size=5, max_overflow=10)
+        # Se define un pool de conexiones altamente resiliente a caídas de red
+        _engine = sqlalchemy.create_engine(
+            "postgresql+pg8000://", 
+            creator=getconn, 
+            pool_size=5, 
+            max_overflow=10,
+            pool_pre_ping=True,  # Verifica que la conexión esté viva antes de usarla
+            pool_recycle=1800    # Recicla conexiones tras 30 mins para evitar timeouts del servidor
+        )
         
     return _engine, _connector
 
-def consultar_cloud_sql(termino_busqueda: str = "") -> pd.DataFrame:
+def cerrar_conexion_bd():
+    """Cierra el pool de conexiones y detiene los hilos en segundo plano del conector."""
+    global _engine, _connector
+    if _engine is not None:
+        _engine.dispose()
+    if _connector is not None:
+        _connector.close()
+
+def consultar_cloud_sql(termino_busqueda: str = "", limite: int = 50) -> pd.DataFrame:
     engine, connector = obtener_motor_bd()
     termino_limpio = termino_busqueda.strip().lower()
     params = None
+    limite_sql = f" LIMIT {limite}" if limite else ""
     if not termino_limpio or termino_limpio in ['todos', 'clientes', 'general', 'lista', 'información']:
-        query = sqlalchemy.text("SELECT * FROM clientes LIMIT 50")
+        query = sqlalchemy.text(f"SELECT * FROM clientes{limite_sql}")
     else:
-        query = sqlalchemy.text("SELECT * FROM clientes WHERE nombre ILIKE :termino OR empresa ILIKE :termino OR notas ILIKE :termino LIMIT 50")
+        query = sqlalchemy.text(f"SELECT * FROM clientes WHERE nombre ILIKE :termino OR empresa ILIKE :termino OR notas ILIKE :termino{limite_sql}")
         params = {"termino": f"%{termino_busqueda}%"}
     
     with engine.connect() as conn:
