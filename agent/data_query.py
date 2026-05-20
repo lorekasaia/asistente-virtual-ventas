@@ -14,7 +14,12 @@ PATRON_SISTEMA_PG = re.compile(r"\b(PG_[A-Z0-9_]+|INFORMATION_SCHEMA)\b")
 def buscar_clientes_por_criterio(termino_busqueda: str = "") -> str:
     try:
         df = consultar_cloud_sql(termino_busqueda)
-        return df.to_string() if not df.empty else "No se encontraron resultados en la base de datos de producción."
+        if not df.empty:
+            # Ocultar columnas de IDs por privacidad
+            cols_privadas = [col for col in df.columns if col.lower() == 'id' or col.lower().endswith('_id')]
+            df = df.drop(columns=cols_privadas, errors='ignore')
+            return df.to_string()
+        return "No se encontraron resultados en la base de datos de producción."
     except Exception as e:
         logger.error(f"Error en buscar_clientes_por_criterio: {e}", exc_info=True)
         return f"Hubo un error al conectar con la base de datos: {e}. Por favor, verifica la configuración."
@@ -45,6 +50,9 @@ def ejecutar_consulta_sql_avanzada(query_sql: str) -> str:
             if not rows:
                 return "La consulta se ejecutó correctamente pero no arrojó resultados."
             df = pd.DataFrame(rows, columns=result.keys())
+            # Ocultar columnas de IDs por privacidad
+            cols_privadas = [col for col in df.columns if col.lower() == 'id' or col.lower().endswith('_id')]
+            df = df.drop(columns=cols_privadas, errors='ignore')
             return "Resultado de la consulta SQL (Mostrando max 50 filas):\n" + df.to_string()
     except Exception as e:
         logger.error(f"Error en ejecutar_consulta_sql_avanzada: {e}", exc_info=True)

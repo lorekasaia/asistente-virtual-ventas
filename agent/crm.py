@@ -32,7 +32,7 @@ def actualizar_estado_cliente(nombre_cliente: str, nuevo_estado_texto: str) -> s
             update_query = sqlalchemy.text("UPDATE clientes SET _estado = :estado, fecha_ultima_actividad = NOW() WHERE id = :id")
             conn.execute(update_query, {"estado": estado_id, "id": cliente_id})
 
-            return f"¡Éxito! El cliente '{nombre_cliente}' ha sido actualizado al estado '{nuevo_estado_texto}' (ID: {estado_id})."
+            return f"¡Éxito! El cliente '{nombre_cliente}' ha sido actualizado al estado '{nuevo_estado_texto}'."
     except Exception as e:
         logger.error(f"Error en actualizar_estado_cliente: {e}", exc_info=True)
         return f"Error al actualizar la base de datos: {e}"

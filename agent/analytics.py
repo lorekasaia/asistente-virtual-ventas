@@ -149,6 +149,10 @@ def exportar_datos_excel(termino_busqueda: str = "") -> str:
         if df.empty:
             return "No hay datos en la base de datos que coincidan con ese criterio para exportar."
         
+        # Ocultar columnas de IDs de usuarios/clientes por privacidad en el reporte
+        cols_privadas = [col for col in df.columns if col.lower() == 'id' or col.lower().endswith('_id')]
+        df = df.drop(columns=cols_privadas, errors='ignore')
+
         filename = f"reporte_clientes_{uuid.uuid4().hex[:8]}.xlsx"
         filepath = os.path.join("reportes", filename)
         df.to_excel(filepath, index=False)
