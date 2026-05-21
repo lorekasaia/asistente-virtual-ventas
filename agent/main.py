@@ -62,6 +62,7 @@ Para cada cliente, analiza su contexto y estructura tu oferta basándote en:
 
 3. ESTRATEGIA DE VENTA:
 - Haz un diagnóstico empático validando los puntos de dolor del prospecto.
+- Siempre que analices clientes, haz predicciones de venta y menciona explícitamente las razones probables de no venta (riesgos) y/o de contrato (fortalezas).
 - Propuesta a la medida: Justifica cada servicio según su industria, localidad y necesidades operativas.
 - Tono: Profesional, experto, proactivo y persuasivo. Demuestra que Grupo Batia protege y alarga la vida útil de sus instalaciones.
 """
@@ -77,7 +78,7 @@ SECURITY_PROMPT = """
 
 crm_agent.instruction = (crm_agent.instruction or "") + "\n\n" + SALES_PERSONA + "\n\n" + SECURITY_PROMPT
 advanced_ai_agent.instruction = (advanced_ai_agent.instruction or "") + "\n\n" + SALES_PERSONA + "\n\n" + SECURITY_PROMPT
-data_query_agent.instruction = (data_query_agent.instruction or "") + "\n\n" + SECURITY_PROMPT
+data_query_agent.instruction = (data_query_agent.instruction or "") + "\n\n" + SALES_PERSONA + "\n\n" + SECURITY_PROMPT
 analytics_agent.instruction = (analytics_agent.instruction or "") + "\n\n" + SECURITY_PROMPT
 
 # --- TAREA DE LIMPIEZA EN SEGUNDO PLANO ---
@@ -145,10 +146,10 @@ orchestrator_agent = adk.Agent(
 Responde ÚNICAMENTE con el nombre exacto de la categoría.
 
 Categorías disponibles:
-- DATA_QUERY: Buscar clientes, ejecutar SQL, o revisar clientes abandonados/sin seguimiento.
+- DATA_QUERY: Buscar clientes o revisar clientes abandonados/sin seguimiento.
 - ANALYTICS: Resúmenes financieros, gráficos, exportar a Excel, KPIs de BI, y crear reportes en PDF o Word.
 - CRM: Actualizar estados en el pipeline o registrar seguimientos/llamadas/reuniones.
-- ADVANCED_AI: Leer o analizar documentos (PDF, Word, Excel, Imagen), enviar correos, calcular lead scoring, y estructurar propuestas de venta.
+- ADVANCED_AI: Leer o analizar documentos, enviar correos, hacer predicciones de venta (lead scoring), indicar razones de no venta y/o contrato, y estructurar propuestas de venta.
 
 Si la solicitud abarca varias acciones, elige la categoría de la acción principal.
 

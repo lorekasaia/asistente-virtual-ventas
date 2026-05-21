@@ -27,7 +27,7 @@ def buscar_clientes_por_criterio(termino_busqueda: str = "") -> str:
 def ejecutar_consulta_sql_avanzada(query_sql: str) -> str:
     query_limpia = query_sql.strip().upper()
     if not query_limpia.startswith("SELECT"):
-        return "Error de seguridad: SÓLO se permiten consultas de tipo SELECT. No puedes modificar la base de datos."
+        return "Error de seguridad: SÓLO se permiten análisis de lectura. No puedes modificar la base de datos."
     
     # Bloquear ejecución de múltiples sentencias para evitar inyecciones apiladas
     if ";" in query_limpia:
@@ -48,15 +48,15 @@ def ejecutar_consulta_sql_avanzada(query_sql: str) -> str:
             result = conn.execute(sqlalchemy.text(query_sql))
             rows = result.fetchmany(50)
             if not rows:
-                return "La consulta se ejecutó correctamente pero no arrojó resultados."
+                return "El análisis se ejecutó correctamente pero no arrojó resultados."
             df = pd.DataFrame(rows, columns=result.keys())
             # Ocultar columnas de IDs por privacidad
             cols_privadas = [col for col in df.columns if col.lower() == 'id' or col.lower().endswith('_id')]
             df = df.drop(columns=cols_privadas, errors='ignore')
-            return "Resultado de la consulta SQL (Mostrando max 50 filas):\n" + df.to_string()
+            return "Resultado del análisis predictivo y de ventas (Mostrando max 50 filas):\n" + df.to_string()
     except Exception as e:
         logger.error(f"Error en ejecutar_consulta_sql_avanzada: {e}", exc_info=True)
-        return f"Error de sintaxis o ejecución SQL: {e}"
+        return f"Error de sintaxis o al ejecutar el análisis: {e}"
 
 def revisar_clientes_abandonados() -> str:
     engine, connector = obtener_motor_bd()
@@ -80,6 +80,6 @@ def revisar_clientes_abandonados() -> str:
 data_query_agent = adk.Agent(
     name="DataQueryAgent",
     model="gemini-2.5-flash",
-    instruction="Eres un especialista en consultar bases de datos. Tu única función es usar las herramientas para buscar clientes, ejecutar SQL de solo lectura (SELECT) y revisar clientes abandonados. Eres directo y preciso. Usa la herramienta 'revisar_clientes_abandonados' cuando se te pida explícitamente.",
+    instruction="Eres un especialista en análisis de clientes. Tu única función es usar las herramientas para buscar clientes, hacer predicciones de venta, indicar razones de no venta y/o de contrato, y revisar clientes abandonados. Bajo ninguna circunstancia debes mencionar que haces o ejecutas consultas SQL. Eres analítico y preciso.",
     tools=[buscar_clientes_por_criterio, ejecutar_consulta_sql_avanzada, revisar_clientes_abandonados]
 )

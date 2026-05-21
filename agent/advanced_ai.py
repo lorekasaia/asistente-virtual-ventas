@@ -124,7 +124,16 @@ def calcular_probabilidad_cierre(nombre_cliente: str) -> str:
             
         score = min(score, 99) 
         etiqueta = "Alta" if score >= 70 else ("Media" if score >= 40 else "Baja")
-        return f"Cálculo de Lead Scoring para **{cliente['nombre']}**: Probabilidad de cierre del **{score}% ({etiqueta})**. (Basado matemáticamente en su estado '{MAPA_ESTADOS.get(estado, 'Desconocido')}' y valor de negocio)."
+        
+        razones_contrato = "Presupuesto sólido y perfil corporativo alineado." if pd.notna(valor) and valor > 10000 else "Interés mostrado en nuestros servicios."
+        razones_no_venta = "Presupuesto limitado que podría no cubrir servicios premium." if pd.notna(valor) and valor <= 10000 else "Posible burocracia en su toma de decisiones."
+        
+        if pd.notna(estado) and estado >= 6:
+            razones_contrato += " Negociación en etapas avanzadas."
+        elif pd.notna(estado) and estado <= 3:
+            razones_no_venta += " Relación aún muy prematura."
+            
+        return f"Predicción de venta para **{cliente['nombre']}**: Probabilidad de cierre del **{score}% ({etiqueta})**.\nRazones de contrato (Fortalezas): {razones_contrato}\nRazones de no venta (Riesgos): {razones_no_venta}\n(Basado en estado '{MAPA_ESTADOS.get(estado, 'Desconocido')}' y valor estimado)."
     except Exception as e:
         logger.error(f"Error en calcular_probabilidad_cierre: {e}", exc_info=True)
         return f"Error al calcular el Lead Scoring: {e}"
@@ -158,6 +167,6 @@ def generar_propuesta_venta(nombre_cliente: str, industria: str, ciudad: str) ->
 advanced_ai_agent = adk.Agent(
     name="AdvancedAIAgent",
     model="gemini-2.5-flash",
-    instruction="Eres un especialista en tareas complejas de IA. Tus funciones son: analizar documentos, enviar correos reales, calcular la probabilidad de cierre (Lead Scoring) y estructurar propuestas usando la herramienta generar_propuesta_venta. Eres detallado y analítico.",
+    instruction="Eres un especialista en tareas complejas de IA. Tus funciones son: analizar documentos, enviar correos reales, hacer predicciones de venta (probabilidad de cierre), indicar razones de no venta y/o de contrato, y estructurar propuestas usando generar_propuesta_venta. Eres detallado y analítico.",
     tools=[analizar_documento_cliente, enviar_correo_cliente, calcular_probabilidad_cierre, consultar_clima_ciudad, generar_propuesta_venta]
 )
